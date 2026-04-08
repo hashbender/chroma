@@ -105,8 +105,12 @@ impl FragmentUploadFaultInjector for () {
     }
 }
 
-#[doc(hidden)]
 #[async_trait::async_trait]
+/// Extension trait for fragment manager factories that can build raw uploaders.
+///
+/// `FaultInjectingFragmentManagerFactory` uses this seam to inject upload faults
+/// around uploader construction while preserving the underlying factory's
+/// consumer implementation.
 pub trait FragmentManagerFactoryWithUploader {
     type FragmentPointer: FragmentPointer;
     type Consumer: FragmentConsumer;
@@ -150,7 +154,11 @@ impl<F: Clone> Clone for FaultInjectingFragmentManagerFactory<F> {
     }
 }
 
-#[doc(hidden)]
+/// A fragment uploader wrapper that applies fault injection before delegating to
+/// the wrapped uploader.
+///
+/// This type is public because it is observable through
+/// `FaultInjectingFragmentManagerFactory`'s associated publisher type.
 pub struct FaultInjectingFragmentUploader<FP: FragmentPointer, U: FragmentUploader<FP>> {
     inner: U,
     fault_injector: Option<Arc<dyn FragmentUploadFaultInjector>>,
@@ -216,34 +224,210 @@ impl<FP: FragmentPointer, U: FragmentUploader<FP>> FragmentUploader<FP>
     }
 }
 
-#[async_trait::async_trait]
-impl<F> FragmentManagerFactory for FaultInjectingFragmentManagerFactory<F>
-where
-    F: FragmentManagerFactoryWithUploader + Send + Sync,
-{
-    type FragmentPointer = F::FragmentPointer;
-    type Publisher = BatchManager<
-        Self::FragmentPointer,
-        FaultInjectingFragmentUploader<Self::FragmentPointer, F::Uploader>,
-    >;
-    type Consumer = F::Consumer;
+/// A fragment publisher that is either the original factory publisher or a
+/// fault-injecting `BatchManager` publisher built around a wrapped uploader.
+///
+/// This type is public because it is the associated publisher type returned by
+/// `FaultInjectingFragmentManagerFactory`.
+pub enum MaybeFaultInjectingFragmentPublisher<
+    FP: FragmentPointer,
+    P: FragmentPublisher<FragmentPointer = FP>,
+    U: FragmentUploader<FP>,
+> {
+    Plain(P),
+    FaultInjecting(BatchManager<FP, FaultInjectingFragmentUploader<FP, U>>),
+}
 
-    async fn make_publisher(&self) -> Result<Self::Publisher, Error> {
-        let fragment_uploader = self.inner.make_fragment_uploader().await?;
-        let fragment_uploader = FaultInjectingFragmentUploader::new(
-            fragment_uploader,
-            self.fault_injector.as_ref().map(Arc::clone),
-        );
-        BatchManager::new(self.inner.write_options(), fragment_uploader)
-            .ok_or_else(|| Error::internal(file!(), line!()))
+#[async_trait::async_trait]
+impl<FP, P, U> FragmentPublisher for MaybeFaultInjectingFragmentPublisher<FP, P, U>
+where
+    FP: FragmentPointer,
+    P: FragmentPublisher<FragmentPointer = FP>,
+    U: FragmentUploader<FP>,
+{
+    type FragmentPointer = FP;
+
+    async fn push_work(
+        &self,
+        messages: Vec<Vec<u8>>,
+        tx: tokio::sync::oneshot::Sender<Result<LogPosition, Error>>,
+        span: Span,
+    ) {
+        match self {
+            Self::Plain(publisher) => publisher.push_work(messages, tx, span).await,
+            Self::FaultInjecting(publisher) => publisher.push_work(messages, tx, span).await,
+        }
     }
 
-    async fn make_consumer(&self) -> Result<Self::Consumer, Error> {
-        self.inner.make_consumer().await
+    async fn take_work(
+        &self,
+        manifest_manager: &(dyn ManifestPublisher<Self::FragmentPointer> + Sync),
+    ) -> Result<
+        Option<(
+            Self::FragmentPointer,
+            Vec<(
+                Vec<Vec<u8>>,
+                tokio::sync::oneshot::Sender<Result<LogPosition, Error>>,
+                Span,
+            )>,
+        )>,
+        Error,
+    > {
+        match self {
+            Self::Plain(publisher) => publisher.take_work(manifest_manager).await,
+            Self::FaultInjecting(publisher) => publisher.take_work(manifest_manager).await,
+        }
+    }
+
+    async fn finish_write(&self) {
+        match self {
+            Self::Plain(publisher) => publisher.finish_write().await,
+            Self::FaultInjecting(publisher) => publisher.finish_write().await,
+        }
+    }
+
+    async fn wait_for_writable(&self) {
+        match self {
+            Self::Plain(publisher) => publisher.wait_for_writable().await,
+            Self::FaultInjecting(publisher) => publisher.wait_for_writable().await,
+        }
+    }
+
+    fn until_next_time(&self) -> Duration {
+        match self {
+            Self::Plain(publisher) => publisher.until_next_time(),
+            Self::FaultInjecting(publisher) => publisher.until_next_time(),
+        }
+    }
+
+    async fn upload_parquet(
+        &self,
+        pointer: &Self::FragmentPointer,
+        messages: Vec<Vec<u8>>,
+        cmek: Option<Cmek>,
+        epoch_micros: u64,
+    ) -> Result<UploadResult, Error> {
+        match self {
+            Self::Plain(publisher) => {
+                publisher
+                    .upload_parquet(pointer, messages, cmek, epoch_micros)
+                    .await
+            }
+            Self::FaultInjecting(publisher) => {
+                publisher
+                    .upload_parquet(pointer, messages, cmek, epoch_micros)
+                    .await
+            }
+        }
+    }
+
+    async fn read_json_file(&self, path: &str) -> Result<(Arc<Vec<u8>>, Option<ETag>), Error> {
+        match self {
+            Self::Plain(publisher) => publisher.read_json_file(path).await,
+            Self::FaultInjecting(publisher) => publisher.read_json_file(path).await,
+        }
     }
 
     async fn preferred_storage(&self) -> Storage {
-        self.inner.preferred_storage().await
+        match self {
+            Self::Plain(publisher) => publisher.preferred_storage().await,
+            Self::FaultInjecting(publisher) => publisher.preferred_storage().await,
+        }
+    }
+
+    async fn preferred_prefix(&self) -> String {
+        match self {
+            Self::Plain(publisher) => publisher.preferred_prefix().await,
+            Self::FaultInjecting(publisher) => publisher.preferred_prefix().await,
+        }
+    }
+
+    async fn storages(&self) -> Vec<repl::StorageWrapper> {
+        match self {
+            Self::Plain(publisher) => publisher.storages().await,
+            Self::FaultInjecting(publisher) => publisher.storages().await,
+        }
+    }
+
+    fn shutdown_prepare(&self) {
+        match self {
+            Self::Plain(publisher) => publisher.shutdown_prepare(),
+            Self::FaultInjecting(publisher) => publisher.shutdown_prepare(),
+        }
+    }
+
+    fn shutdown_finish(&self) {
+        match self {
+            Self::Plain(publisher) => publisher.shutdown_finish(),
+            Self::FaultInjecting(publisher) => publisher.shutdown_finish(),
+        }
+    }
+
+    async fn write_garbage(
+        &self,
+        options: &ThrottleOptions,
+        existing: Option<&ETag>,
+        garbage: &Garbage,
+    ) -> Result<Option<ETag>, Error> {
+        match self {
+            Self::Plain(publisher) => publisher.write_garbage(options, existing, garbage).await,
+            Self::FaultInjecting(publisher) => {
+                publisher.write_garbage(options, existing, garbage).await
+            }
+        }
+    }
+
+    async fn reset_garbage(&self, options: &ThrottleOptions, e_tag: &ETag) -> Result<(), Error> {
+        match self {
+            Self::Plain(publisher) => publisher.reset_garbage(options, e_tag).await,
+            Self::FaultInjecting(publisher) => publisher.reset_garbage(options, e_tag).await,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl<F> FragmentManagerFactory for FaultInjectingFragmentManagerFactory<F>
+where
+    F: FragmentManagerFactory
+        + FragmentManagerFactoryWithUploader<
+            FragmentPointer = <F as FragmentManagerFactory>::FragmentPointer,
+            Consumer = <F as FragmentManagerFactory>::Consumer,
+        > + Send
+        + Sync,
+{
+    type FragmentPointer = <F as FragmentManagerFactory>::FragmentPointer;
+    type Publisher = MaybeFaultInjectingFragmentPublisher<
+        Self::FragmentPointer,
+        <F as FragmentManagerFactory>::Publisher,
+        <F as FragmentManagerFactoryWithUploader>::Uploader,
+    >;
+    type Consumer = <F as FragmentManagerFactory>::Consumer;
+
+    async fn make_publisher(&self) -> Result<Self::Publisher, Error> {
+        if let Some(fault_injector) = self.fault_injector.as_ref() {
+            let fragment_uploader = self.inner.make_fragment_uploader().await?;
+            let fragment_uploader = FaultInjectingFragmentUploader::new(
+                fragment_uploader,
+                Some(Arc::clone(fault_injector)),
+            );
+            let publisher = BatchManager::new(self.inner.write_options(), fragment_uploader)
+                .ok_or_else(|| Error::internal(file!(), line!()))?;
+            Ok(MaybeFaultInjectingFragmentPublisher::FaultInjecting(
+                publisher,
+            ))
+        } else {
+            Ok(MaybeFaultInjectingFragmentPublisher::Plain(
+                FragmentManagerFactory::make_publisher(&self.inner).await?,
+            ))
+        }
+    }
+
+    async fn make_consumer(&self) -> Result<Self::Consumer, Error> {
+        FragmentManagerFactory::make_consumer(&self.inner).await
+    }
+
+    async fn preferred_storage(&self) -> Storage {
+        FragmentManagerFactory::preferred_storage(&self.inner).await
     }
 }
 
@@ -964,6 +1148,28 @@ mod tests {
 
         fn write_options(&self) -> LogWriterOptions {
             LogWriterOptions::default()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl FragmentManagerFactory for RecordingFactory {
+        type FragmentPointer = (FragmentSeqNo, LogPosition);
+        type Publisher = BatchManager<Self::FragmentPointer, RecordingUploader>;
+        type Consumer = RecordingConsumer;
+
+        async fn make_publisher(&self) -> Result<Self::Publisher, Error> {
+            let fragment_uploader =
+                <Self as FragmentManagerFactoryWithUploader>::make_fragment_uploader(self).await?;
+            BatchManager::new(LogWriterOptions::default(), fragment_uploader)
+                .ok_or_else(|| Error::internal(file!(), line!()))
+        }
+
+        async fn make_consumer(&self) -> Result<Self::Consumer, Error> {
+            <Self as FragmentManagerFactoryWithUploader>::make_consumer(self).await
+        }
+
+        async fn preferred_storage(&self) -> Storage {
+            <Self as FragmentManagerFactoryWithUploader>::preferred_storage(self).await
         }
     }
 

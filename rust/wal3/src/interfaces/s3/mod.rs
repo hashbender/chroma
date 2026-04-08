@@ -75,6 +75,14 @@ impl S3FragmentManagerFactory {
             Arc::clone(&self.mark_dirty),
         )
     }
+
+    fn build_fragment_puller(&self) -> S3FragmentPuller {
+        S3FragmentPuller::new(
+            self.read.clone(),
+            Arc::new(self.storage.clone()),
+            self.prefix.clone(),
+        )
+    }
 }
 
 #[async_trait::async_trait]
@@ -94,11 +102,7 @@ impl FragmentManagerFactory for S3FragmentManagerFactory {
     }
 
     async fn make_consumer(&self) -> Result<Self::Consumer, Error> {
-        Ok(S3FragmentPuller::new(
-            self.read.clone(),
-            Arc::new(self.storage.clone()),
-            self.prefix.clone(),
-        ))
+        Ok(self.build_fragment_puller())
     }
 }
 
@@ -113,11 +117,7 @@ impl FragmentManagerFactoryWithUploader for S3FragmentManagerFactory {
     }
 
     async fn make_consumer(&self) -> Result<Self::Consumer, Error> {
-        Ok(S3FragmentPuller::new(
-            self.read.clone(),
-            Arc::new(self.storage.clone()),
-            self.prefix.clone(),
-        ))
+        Ok(self.build_fragment_puller())
     }
 
     async fn preferred_storage(&self) -> Storage {
