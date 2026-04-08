@@ -13,8 +13,8 @@ use chroma_types::Cmek;
 
 use crate::{
     CursorWitness, Error, Fragment, FragmentIdentifier, FragmentSeqNo, FragmentUuid, Garbage,
-    GarbageCollectionOptions, LogPosition, Manifest, ManifestAndWitness, Snapshot, SnapshotPointer,
-    StorageWrapper, ThrottleOptions,
+    GarbageCollectionOptions, LogPosition, LogWriterOptions, Manifest, ManifestAndWitness,
+    Snapshot, SnapshotPointer, StorageWrapper, ThrottleOptions,
 };
 
 pub mod batch_manager;
@@ -80,6 +80,171 @@ pub trait FragmentManagerFactory {
     async fn make_publisher(&self) -> Result<Self::Publisher, Error>;
     async fn make_consumer(&self) -> Result<Self::Consumer, Error>;
     async fn preferred_storage(&self) -> Storage;
+}
+
+//////////////////////////////////// Fragment Upload Fault Injection ///////////////////////////////
+
+/// The label used by downstream services to target wal3 fragment uploads with fault injection.
+pub const FRAGMENT_UPLOAD_FAULT_LABEL: &str = "wal3.fragment_upload";
+
+/// Faults that can be injected immediately before a fragment upload begins.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FragmentUploadFault {
+    Unavailable,
+    Delay(Duration),
+}
+
+/// Supplies optional upload faults to wal3 without coupling the crate to a specific registry.
+pub trait FragmentUploadFaultInjector: Send + Sync + 'static {
+    fn fault_for_upload(&self) -> Option<FragmentUploadFault>;
+}
+
+impl FragmentUploadFaultInjector for () {
+    fn fault_for_upload(&self) -> Option<FragmentUploadFault> {
+        None
+    }
+}
+
+#[doc(hidden)]
+#[async_trait::async_trait]
+pub trait FragmentManagerFactoryWithUploader {
+    type FragmentPointer: FragmentPointer;
+    type Consumer: FragmentConsumer;
+    type Uploader: FragmentUploader<Self::FragmentPointer>;
+
+    async fn make_fragment_uploader(&self) -> Result<Self::Uploader, Error>;
+    async fn make_consumer(&self) -> Result<Self::Consumer, Error>;
+    async fn preferred_storage(&self) -> Storage;
+    fn write_options(&self) -> LogWriterOptions;
+}
+
+/// Wraps a fragment manager factory so every publisher it creates applies upload fault injection.
+pub struct FaultInjectingFragmentManagerFactory<F> {
+    inner: F,
+    fault_injector: Option<Arc<dyn FragmentUploadFaultInjector>>,
+}
+
+impl<F> FaultInjectingFragmentManagerFactory<F> {
+    pub fn new(inner: F, fault_injector: Option<Arc<dyn FragmentUploadFaultInjector>>) -> Self {
+        Self {
+            inner,
+            fault_injector,
+        }
+    }
+
+    pub fn inner(&self) -> &F {
+        &self.inner
+    }
+
+    pub fn into_inner(self) -> F {
+        self.inner
+    }
+}
+
+impl<F: Clone> Clone for FaultInjectingFragmentManagerFactory<F> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            fault_injector: self.fault_injector.as_ref().map(Arc::clone),
+        }
+    }
+}
+
+#[doc(hidden)]
+pub struct FaultInjectingFragmentUploader<FP: FragmentPointer, U: FragmentUploader<FP>> {
+    inner: U,
+    fault_injector: Option<Arc<dyn FragmentUploadFaultInjector>>,
+    _phantom: std::marker::PhantomData<FP>,
+}
+
+impl<FP: FragmentPointer, U: FragmentUploader<FP>> FaultInjectingFragmentUploader<FP, U> {
+    fn new(inner: U, fault_injector: Option<Arc<dyn FragmentUploadFaultInjector>>) -> Self {
+        Self {
+            inner,
+            fault_injector,
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl<FP: FragmentPointer, U: FragmentUploader<FP>> FragmentUploader<FP>
+    for FaultInjectingFragmentUploader<FP, U>
+{
+    async fn upload_parquet(
+        &self,
+        pointer: &FP,
+        messages: Vec<Vec<u8>>,
+        cmek: Option<Cmek>,
+        epoch_micros: u64,
+    ) -> Result<UploadResult, Error> {
+        match self
+            .fault_injector
+            .as_ref()
+            .and_then(|fault_injector| fault_injector.fault_for_upload())
+        {
+            Some(FragmentUploadFault::Delay(delay)) => {
+                tokio::time::sleep(delay).await;
+            }
+            Some(FragmentUploadFault::Unavailable) => {
+                return Err(Error::TonicError(tonic::Status::unavailable(format!(
+                    "fault injected for {}",
+                    FRAGMENT_UPLOAD_FAULT_LABEL
+                ))));
+            }
+            None => {}
+        }
+        self.inner
+            .upload_parquet(pointer, messages, cmek, epoch_micros)
+            .await
+    }
+
+    async fn preferred_storage(&self) -> Storage {
+        self.inner.preferred_storage().await
+    }
+
+    async fn preferred_prefix(&self) -> String {
+        self.inner.preferred_prefix().await
+    }
+
+    async fn preferred_storage_wrapper(&self) -> &StorageWrapper {
+        self.inner.preferred_storage_wrapper().await
+    }
+
+    async fn storages(&self) -> &[StorageWrapper] {
+        self.inner.storages().await
+    }
+}
+
+#[async_trait::async_trait]
+impl<F> FragmentManagerFactory for FaultInjectingFragmentManagerFactory<F>
+where
+    F: FragmentManagerFactoryWithUploader + Send + Sync,
+{
+    type FragmentPointer = F::FragmentPointer;
+    type Publisher = BatchManager<
+        Self::FragmentPointer,
+        FaultInjectingFragmentUploader<Self::FragmentPointer, F::Uploader>,
+    >;
+    type Consumer = F::Consumer;
+
+    async fn make_publisher(&self) -> Result<Self::Publisher, Error> {
+        let fragment_uploader = self.inner.make_fragment_uploader().await?;
+        let fragment_uploader = FaultInjectingFragmentUploader::new(
+            fragment_uploader,
+            self.fault_injector.as_ref().map(Arc::clone),
+        );
+        BatchManager::new(self.inner.write_options(), fragment_uploader)
+            .ok_or_else(|| Error::internal(file!(), line!()))
+    }
+
+    async fn make_consumer(&self) -> Result<Self::Consumer, Error> {
+        self.inner.make_consumer().await
+    }
+
+    async fn preferred_storage(&self) -> Storage {
+        self.inner.preferred_storage().await
+    }
 }
 
 ///////////////////////////////////////// FragmentUploader /////////////////////////////////////////
@@ -544,7 +709,11 @@ async fn read_raw_bytes(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use super::*;
+    use crate::{FragmentSeqNo, LogPosition};
+    use chroma_storage::Storage;
 
     const TEST_EPOCH_MICROS: u64 = 1234567890123456;
 
@@ -682,5 +851,148 @@ mod tests {
             setsum_from_writer, setsum_from_reader,
             "setsums should match for absolute-offset files"
         );
+    }
+
+    #[derive(Clone)]
+    struct InjectUnavailable;
+
+    impl FragmentUploadFaultInjector for InjectUnavailable {
+        fn fault_for_upload(&self) -> Option<FragmentUploadFault> {
+            Some(FragmentUploadFault::Unavailable)
+        }
+    }
+
+    #[derive(Clone)]
+    struct RecordingFactory {
+        storage: Storage,
+        upload_attempts: Arc<AtomicUsize>,
+    }
+
+    struct RecordingUploader {
+        storage: Storage,
+        upload_attempts: Arc<AtomicUsize>,
+    }
+
+    struct RecordingConsumer;
+
+    #[async_trait::async_trait]
+    impl FragmentUploader<(FragmentSeqNo, LogPosition)> for RecordingUploader {
+        async fn upload_parquet(
+            &self,
+            _pointer: &(FragmentSeqNo, LogPosition),
+            _messages: Vec<Vec<u8>>,
+            _cmek: Option<Cmek>,
+            _epoch_micros: u64,
+        ) -> Result<UploadResult, Error> {
+            self.upload_attempts.fetch_add(1, Ordering::Relaxed);
+            Ok(UploadResult {
+                path: "fragment".to_string(),
+                setsum: Setsum::default(),
+                num_bytes: 0,
+                successful_regions: vec![],
+            })
+        }
+
+        async fn preferred_storage(&self) -> Storage {
+            self.storage.clone()
+        }
+
+        async fn preferred_prefix(&self) -> String {
+            "prefix".to_string()
+        }
+
+        async fn preferred_storage_wrapper(&self) -> &StorageWrapper {
+            panic!("not used")
+        }
+
+        async fn storages(&self) -> &[StorageWrapper] {
+            panic!("not used")
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl FragmentConsumer for RecordingConsumer {
+        async fn read_bytes(&self, _path: &str) -> Result<Arc<Vec<u8>>, Error> {
+            panic!("not used")
+        }
+
+        async fn parse_parquet(
+            &self,
+            _parquet: &[u8],
+            _starting_log_position: LogPosition,
+        ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64, u64), Error> {
+            panic!("not used")
+        }
+
+        async fn parse_parquet_fast(
+            &self,
+            _parquet: &[u8],
+            _starting_log_position: LogPosition,
+        ) -> Result<(Vec<(LogPosition, Vec<u8>)>, u64, u64), Error> {
+            panic!("not used")
+        }
+
+        async fn read_fragment(
+            &self,
+            _path: &str,
+            _fragment_first_log_position: LogPosition,
+        ) -> Result<Option<Fragment>, Error> {
+            panic!("not used")
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl FragmentManagerFactoryWithUploader for RecordingFactory {
+        type FragmentPointer = (FragmentSeqNo, LogPosition);
+        type Consumer = RecordingConsumer;
+        type Uploader = RecordingUploader;
+
+        async fn make_fragment_uploader(&self) -> Result<Self::Uploader, Error> {
+            Ok(RecordingUploader {
+                storage: self.storage.clone(),
+                upload_attempts: Arc::clone(&self.upload_attempts),
+            })
+        }
+
+        async fn make_consumer(&self) -> Result<Self::Consumer, Error> {
+            Ok(RecordingConsumer)
+        }
+
+        async fn preferred_storage(&self) -> Storage {
+            self.storage.clone()
+        }
+
+        fn write_options(&self) -> LogWriterOptions {
+            LogWriterOptions::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn fault_injecting_fragment_manager_factory_short_circuits_uploads() {
+        let storage = Storage::Local(chroma_storage::local::LocalStorage::new("/tmp"));
+        let upload_attempts = Arc::new(AtomicUsize::new(0));
+        let factory = FaultInjectingFragmentManagerFactory::new(
+            RecordingFactory {
+                storage,
+                upload_attempts: Arc::clone(&upload_attempts),
+            },
+            Some(Arc::new(InjectUnavailable)),
+        );
+
+        let publisher = factory.make_publisher().await.expect("publisher");
+        let err = publisher
+            .upload_parquet(
+                &(FragmentSeqNo::BEGIN, LogPosition::from_offset(1)),
+                vec![b"hello".to_vec()],
+                None,
+                0,
+            )
+            .await
+            .expect_err("fault injection should reject upload");
+
+        assert!(
+            matches!(&err, Error::TonicError(status) if status.code() == tonic::Code::Unavailable)
+        );
+        assert_eq!(upload_attempts.load(Ordering::Relaxed), 0);
     }
 }

@@ -6,7 +6,9 @@ use chroma_storage::{
 use setsum::Setsum;
 use tracing::Level;
 
-use crate::interfaces::{FragmentManagerFactory, ManifestManagerFactory};
+use crate::interfaces::{
+    FragmentManagerFactory, FragmentManagerFactoryWithUploader, ManifestManagerFactory,
+};
 use crate::{
     fragment_path, parse_fragment_path, Error, Fragment, FragmentIdentifier, FragmentSeqNo,
     LogPosition, LogReaderOptions, LogWriterOptions, Manifest, MarkDirty, Snapshot, SnapshotCache,
@@ -64,6 +66,17 @@ pub struct S3FragmentManagerFactory {
     pub mark_dirty: Arc<dyn MarkDirty>,
 }
 
+impl S3FragmentManagerFactory {
+    fn build_fragment_uploader(&self) -> S3FragmentUploader {
+        S3FragmentUploader::new(
+            self.write.clone(),
+            self.storage.clone(),
+            self.prefix.clone(),
+            Arc::clone(&self.mark_dirty),
+        )
+    }
+}
+
 #[async_trait::async_trait]
 impl FragmentManagerFactory for S3FragmentManagerFactory {
     type FragmentPointer = (FragmentSeqNo, LogPosition);
@@ -75,12 +88,7 @@ impl FragmentManagerFactory for S3FragmentManagerFactory {
     }
 
     async fn make_publisher(&self) -> Result<Self::Publisher, Error> {
-        let fragment_uploader = S3FragmentUploader::new(
-            self.write.clone(),
-            self.storage.clone(),
-            self.prefix.clone(),
-            Arc::clone(&self.mark_dirty),
-        );
+        let fragment_uploader = self.build_fragment_uploader();
         BatchManager::new(self.write.clone(), fragment_uploader)
             .ok_or_else(|| Error::internal(file!(), line!()))
     }
@@ -91,6 +99,33 @@ impl FragmentManagerFactory for S3FragmentManagerFactory {
             Arc::new(self.storage.clone()),
             self.prefix.clone(),
         ))
+    }
+}
+
+#[async_trait::async_trait]
+impl FragmentManagerFactoryWithUploader for S3FragmentManagerFactory {
+    type FragmentPointer = (FragmentSeqNo, LogPosition);
+    type Consumer = S3FragmentPuller;
+    type Uploader = S3FragmentUploader;
+
+    async fn make_fragment_uploader(&self) -> Result<Self::Uploader, Error> {
+        Ok(self.build_fragment_uploader())
+    }
+
+    async fn make_consumer(&self) -> Result<Self::Consumer, Error> {
+        Ok(S3FragmentPuller::new(
+            self.read.clone(),
+            Arc::new(self.storage.clone()),
+            self.prefix.clone(),
+        ))
+    }
+
+    async fn preferred_storage(&self) -> Storage {
+        self.storage.clone()
+    }
+
+    fn write_options(&self) -> LogWriterOptions {
+        self.write.clone()
     }
 }
 
