@@ -57,11 +57,15 @@ use wal3::{
     create_repl_factories, create_s3_factories,
     interfaces::repl::ManifestManager as ReplManifestManager, interfaces::ManifestManagerFactory,
     scan_from_manifest, Cursor, CursorName, CursorStore, CursorStoreOptions, CursorWitness,
-    FaultInjectingFragmentManagerFactory, Fragment, FragmentManagerFactory, FragmentUploadFault,
-    FragmentUploadFaultInjector, GarbageCollectionOptions, Limits, LogPosition, LogReader,
-    LogReaderOptions, LogReaderTrait, LogWriter, LogWriterOptions, LogWriterTrait, Manifest,
-    ManifestAndWitness, MarkDirty as MarkDirtyTrait, ReplicatedFragmentOptions, Snapshot,
-    SnapshotCache, SnapshotPointer, StorageWrapper, FRAGMENT_UPLOAD_FAULT_LABEL, INTRINSIC_CURSOR,
+    Fragment, FragmentManagerFactory, FragmentUploadFaultInjector, GarbageCollectionOptions,
+    Limits, LogPosition, LogReader, LogReaderOptions, LogReaderTrait, LogWriter, LogWriterOptions,
+    LogWriterTrait, Manifest, ManifestAndWitness, MarkDirty as MarkDirtyTrait,
+    ReplicatedFragmentOptions, Snapshot, SnapshotCache, SnapshotPointer, StorageWrapper,
+    INTRINSIC_CURSOR,
+};
+#[cfg(feature = "faults")]
+use wal3::{
+    FaultInjectingFragmentManagerFactory, FragmentUploadFault, FRAGMENT_UPLOAD_FAULT_LABEL,
 };
 
 mod scrub;
@@ -118,17 +122,20 @@ const DEFAULT_CONFIG_PATH: &str = "./chroma_config.yaml";
 
 const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
 
+#[cfg(feature = "faults")]
 #[derive(Clone)]
 struct LogServiceFragmentUploadFaultInjector {
     faults: Arc<FaultRegistry>,
 }
 
+#[cfg(feature = "faults")]
 impl LogServiceFragmentUploadFaultInjector {
     fn new(faults: Arc<FaultRegistry>) -> Self {
         Self { faults }
     }
 }
 
+#[cfg(feature = "faults")]
 impl FragmentUploadFaultInjector for LogServiceFragmentUploadFaultInjector {
     fn fault_for_upload(&self) -> Option<FragmentUploadFault> {
         self.faults
@@ -138,6 +145,25 @@ impl FragmentUploadFaultInjector for LogServiceFragmentUploadFaultInjector {
                 chroma_faults::FaultActionKind::Delay(delay) => FragmentUploadFault::Delay(delay),
             })
     }
+}
+
+#[cfg(feature = "faults")]
+fn maybe_wrap_fragment_manager_factory<F>(
+    fragment_manager_factory: F,
+    fragment_upload_fault_injector: Option<Arc<dyn FragmentUploadFaultInjector>>,
+) -> FaultInjectingFragmentManagerFactory<F> {
+    FaultInjectingFragmentManagerFactory::new(
+        fragment_manager_factory,
+        fragment_upload_fault_injector,
+    )
+}
+
+#[cfg(not(feature = "faults"))]
+fn maybe_wrap_fragment_manager_factory<F>(
+    fragment_manager_factory: F,
+    _fragment_upload_fault_injector: Option<Arc<dyn FragmentUploadFaultInjector>>,
+) -> F {
+    fragment_manager_factory
 }
 
 // SAFETY(rescrv):  There's a test that this produces a valid type.
@@ -416,13 +442,10 @@ impl<'a> FactoryCreationContext<'a> {
             region_names,
             self.collection_id.0,
         );
-        #[cfg(feature = "faults")]
-        let fragment_factory = FaultInjectingFragmentManagerFactory::new(
+        let fragment_factory = maybe_wrap_fragment_manager_factory(
             fragment_factory,
             self.fragment_upload_fault_injector.as_ref().map(Arc::clone),
         );
-        #[cfg(not(feature = "faults"))]
-        let fragment_factory = fragment_factory;
         let fragment_publisher = fragment_factory.make_publisher().await?;
         Ok(wal3::copy(reader, cursor, &fragment_publisher, manifest_factory, cmek).await?)
     }
@@ -450,13 +473,10 @@ impl<'a> FactoryCreationContext<'a> {
             Arc::new(()),
             Arc::clone(&self.snapshot_cache),
         );
-        #[cfg(feature = "faults")]
-        let fragment_factory = FaultInjectingFragmentManagerFactory::new(
+        let fragment_factory = maybe_wrap_fragment_manager_factory(
             fragment_factory,
             self.fragment_upload_fault_injector.as_ref().map(Arc::clone),
         );
-        #[cfg(not(feature = "faults"))]
-        let fragment_factory = fragment_factory;
         let fragment_publisher = fragment_factory.make_publisher().await?;
         Ok(wal3::copy(reader, cursor, &fragment_publisher, manifest_factory, cmek).await?)
     }
@@ -683,13 +703,10 @@ async fn get_log_from_handle_with_mutex_held<'a>(
             region_names,
             collection_id.0,
         );
-        #[cfg(feature = "faults")]
-        let fragment_factory = FaultInjectingFragmentManagerFactory::new(
-            fragment_factory,
-            self.fragment_upload_fault_injector.as_ref().map(Arc::clone),
+        let fragment_publisher_factory = maybe_wrap_fragment_manager_factory(
+            fragment_publisher_factory,
+            fragment_upload_fault_injector.as_ref().map(Arc::clone),
         );
-        #[cfg(not(feature = "faults"))]
-        let fragment_factory = fragment_factory;
         let opened = LogWriter::open_or_initialize(
             write_options.clone(),
             "log writer",
@@ -740,13 +757,10 @@ async fn get_log_from_handle_with_mutex_held<'a>(
             mark_dirty_arc,
             snapshot_cache,
         );
-        #[cfg(feature = "faults")]
-        let fragment_factory = FaultInjectingFragmentManagerFactory::new(
-            fragment_factory,
-            self.fragment_upload_fault_injector.as_ref().map(Arc::clone),
+        let fragment_publisher_factory = maybe_wrap_fragment_manager_factory(
+            fragment_publisher_factory,
+            fragment_upload_fault_injector.as_ref().map(Arc::clone),
         );
-        #[cfg(not(feature = "faults"))]
-        let fragment_factory = fragment_factory;
         let opened = LogWriter::open_or_initialize(
             write_options.clone(),
             "log writer",
@@ -1173,9 +1187,16 @@ impl LogServer {
     }
 
     fn fragment_upload_fault_injector(&self) -> Option<Arc<dyn FragmentUploadFaultInjector>> {
-        Some(Arc::new(LogServiceFragmentUploadFaultInjector::new(
-            Arc::clone(&self.faults),
-        )))
+        #[cfg(feature = "faults")]
+        {
+            Some(Arc::new(LogServiceFragmentUploadFaultInjector::new(
+                Arc::clone(&self.faults),
+            )))
+        }
+        #[cfg(not(feature = "faults"))]
+        {
+            None
+        }
     }
 
     fn snapshot_cache_for_collection(
@@ -5139,6 +5160,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "faults")]
     #[tokio::test]
     async fn fragment_upload_fault_injection_rejects_then_recovers() {
         let (ctor, dtor) = s3_setup_log_server();
