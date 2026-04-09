@@ -138,7 +138,10 @@ async def catch_exceptions_middleware(
         )
     except Exception as e:
         logger.exception(e)
-        return ORJSONResponse(content={"error": repr(e)}, status_code=500)
+        return ORJSONResponse(
+            content={"error": "Internal Server Error"},
+            status_code=500,
+        )
 
 
 async def check_http_version_middleware(
@@ -193,7 +196,7 @@ class FastAPI(Server):
     def __init__(self, settings: Settings):
         ProductTelemetryClient.SERVER_CONTEXT = ServerContext.FASTAPI
         # https://fastapi.tiangolo.com/advanced/custom-response/#use-orjsonresponse
-        self._app = fastapi.FastAPI(debug=True, default_response_class=ORJSONResponse)
+        self._app = fastapi.FastAPI(debug=settings.chroma_server_debug, default_response_class=ORJSONResponse)
         self._system = System(settings)
         self._api: ServerAPI = self._system.instance(ServerAPI)
 

@@ -159,7 +159,8 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
                     """
             )
             for row in cur.fetchall():
-                cur.execute(f"DROP TABLE IF EXISTS {row[0]}")
+                table_name = row[0].replace('"', '""')
+                cur.execute(f'DROP TABLE IF EXISTS "{table_name}"')
         self._conn_pool.close()
         self.start()
         super().reset_state()
@@ -263,7 +264,8 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
     def vacuum(self, timeout: int = 5) -> None:
         """Runs VACUUM on the database. `timeout` is the maximum time to wait for an exclusive lock in seconds."""
         conn = self._conn_pool.connect()
-        conn.execute(f"PRAGMA busy_timeout = {int(timeout) * 1000}")
+        busy_timeout_ms = int(timeout) * 1000
+        conn.execute("PRAGMA busy_timeout = ?", (busy_timeout_ms,))
         conn.execute("VACUUM")
         conn.execute(
             """
