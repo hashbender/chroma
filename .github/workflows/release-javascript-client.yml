@@ -3,8 +3,8 @@ name: 📦 Release JavaScript client
 on:
   push:
     tags:
-      - 'js_release_[0-9]+\.[0-9]+\.[0-9]+'  # Match tags in the form js_release_X.Y.Z
-      - 'js_release_alpha_[0-9]+\.[0-9]+\.[0-9]+'  # Match tags in the form js_release_alpha_X.Y.Z
+      - 'js_release_[0-9]+\.[0-9]+\.[0-9]+' # Match tags in the form js_release_X.Y.Z
+      - 'js_release_alpha_[0-9]+\.[0-9]+\.[0-9]+' # Match tags in the form js_release_alpha_X.Y.Z
   workflow_dispatch:
     inputs:
       tag:
@@ -17,8 +17,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        registry: [ "https://registry.npmjs.org", "https://npm.pkg.github.com" ]
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+        registry: ["https://registry.npmjs.org", "https://npm.pkg.github.com"]
+    runs-on: tenki-standard-autoscale
     permissions: write-all
     steps:
     - name: Resolve tag
@@ -93,7 +93,7 @@ jobs:
     name: Notify Slack on Release Failure
     if: failure()
     needs: [release]
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: tenki-standard-autoscale
     steps:
       - name: Resolve tag
         id: tag
