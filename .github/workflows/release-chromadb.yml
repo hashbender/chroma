@@ -9,7 +9,7 @@ on:
 
 jobs:
   check-tag:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: tenki-standard-autoscale
     outputs:
       tag_matches: ${{ steps.check-tag.outputs.tag_matches }}
     steps:
@@ -24,7 +24,7 @@ jobs:
           fi
 
   get-version:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: tenki-standard-autoscale
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -109,7 +109,7 @@ jobs:
 
   release-thin-pypi:
     name: Publish thin client to PyPI
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: tenki-standard-autoscale
     needs:
       - check-tag
       - python-tests-linux
@@ -139,7 +139,7 @@ jobs:
           repository-url: https://test.pypi.org/legacy/
           verbose: 'true'
       - name: Publish to PyPI
-        if:  ${{ needs.check-tag.outputs.tag_matches == 'true' }}
+        if: ${{ needs.check-tag.outputs.tag_matches == 'true' }}
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           password: ${{ secrets.PYPI_PYTHON_CLIENT_PUBLISH_KEY }}
@@ -147,7 +147,7 @@ jobs:
 
   release-github:
     name: Make GitHub release
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: tenki-standard-autoscale
     needs:
       - check-tag
       - get-version
@@ -224,7 +224,7 @@ jobs:
       - release-thin-pypi
       - release-github
       - deploy-staging
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: tenki-standard-autoscale
     steps:
       - name: Notify Slack
         uses: slackapi/slack-github-action@v2.0.0
