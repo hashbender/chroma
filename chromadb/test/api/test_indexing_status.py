@@ -5,6 +5,7 @@ from chromadb.api.types import IndexingStatus
 from chromadb.test.conftest import skip_if_not_cluster
 from chromadb.test.utils.wait_for_version_increase import (
     get_collection_version,
+    poll_for_condition,
     wait_for_version_increase,
 )
 
@@ -45,8 +46,14 @@ def test_indexing_status_after_add(client: ClientAPI) -> None:
         assert status.num_indexed_ops == 0
         assert status.op_indexing_progress == 0.0
         wait_for_version_increase(client, collection.name, initial_version)
-        # Give some time to invalidate the frontend query cache
-        sleep(60)
+
+        # Poll until indexing completes (replaces fixed sleep for cache invalidation)
+        poll_for_condition(
+            lambda: collection.get_indexing_status().num_indexed_ops == 300,
+            timeout=120,
+            interval=5,
+            description="indexing to complete for 300 ops",
+        )
 
         # Check status after indexing completes
         final_status = collection.get_indexing_status()
@@ -75,7 +82,14 @@ def test_indexing_status_after_upsert(client: ClientAPI) -> None:
         assert status.num_indexed_ops == 0
         assert status.op_indexing_progress == 0.0
         wait_for_version_increase(client, collection.name, initial_version)
-        sleep(60)
+
+        # Poll until indexing completes (replaces fixed sleep for cache invalidation)
+        poll_for_condition(
+            lambda: collection.get_indexing_status().num_indexed_ops >= 2,
+            timeout=120,
+            interval=5,
+            description="indexing to complete for upsert ops",
+        )
 
     collection.upsert(ids=["id1", "id3"], embeddings=[[1.1, 2.1, 3.1], [7.0, 8.0, 9.0]])  # type: ignore
 
@@ -103,7 +117,14 @@ def test_indexing_status_after_delete(client: ClientAPI) -> None:
         assert status.num_indexed_ops == 0
         assert status.op_indexing_progress == 0.0
         wait_for_version_increase(client, collection.name, initial_version)
-        sleep(60)
+
+        # Poll until indexing completes (replaces fixed sleep for cache invalidation)
+        poll_for_condition(
+            lambda: collection.get_indexing_status().num_indexed_ops >= 3,
+            timeout=120,
+            interval=5,
+            description="indexing to complete for delete test ops",
+        )
 
     initial_status = collection.get_indexing_status()
     assert initial_status.total_ops == 3
@@ -133,7 +154,14 @@ def test_indexing_status_field_types(client: ClientAPI) -> None:
         assert status.num_indexed_ops == 0
         assert status.op_indexing_progress == 0.0
         wait_for_version_increase(client, collection.name, initial_version)
-        sleep(60)
+
+        # Poll until indexing completes (replaces fixed sleep for cache invalidation)
+        poll_for_condition(
+            lambda: collection.get_indexing_status().num_indexed_ops >= 1,
+            timeout=120,
+            interval=5,
+            description="indexing to complete for field types test",
+        )
 
     final_status = collection.get_indexing_status()
 
@@ -195,7 +223,15 @@ def test_indexing_status_batch_progression(client: ClientAPI) -> None:
         print("witnessed status: ", status)
         ops_indexed = status.num_indexed_ops
         wait_for_version_increase(client, collection.name, current_version)
-        sleep(60)
+
+        # Poll until indexing progresses (replaces fixed sleep for cache invalidation)
+        current_indexed = status.num_indexed_ops
+        poll_for_condition(
+            lambda: collection.get_indexing_status().num_indexed_ops > current_indexed,
+            timeout=120,
+            interval=5,
+            description="batch indexing progression",
+        )
 
 
 @skip_if_not_cluster()

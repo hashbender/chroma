@@ -65,9 +65,9 @@ def print_traces() -> None:
         print(f"{key}: {value}")
 
 
-dtype_shared_st: st.SearchStrategy[Union[np.float16, np.float32, np.float64]] = (
-    st.shared(st.sampled_from(strategies.float_types), key="dtype")
-)
+dtype_shared_st: st.SearchStrategy[
+    Union[np.float16, np.float32, np.float64]
+] = st.shared(st.sampled_from(strategies.float_types), key="dtype")
 
 dimension_shared_st: st.SearchStrategy[int] = st.shared(
     st.integers(min_value=2, max_value=2048), key="dimension"
@@ -263,17 +263,19 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
             if id in self.record_set_state["ids"]:
                 target_idx = self.record_set_state["ids"].index(id)
                 if normalized_record_set["embeddings"] is not None:
-                    self.record_set_state["embeddings"][target_idx] = (
-                        normalized_record_set["embeddings"][idx]
-                    )
+                    self.record_set_state["embeddings"][
+                        target_idx
+                    ] = normalized_record_set["embeddings"][idx]
                 else:
                     assert normalized_record_set["documents"] is not None
                     assert self.embedding_function is not None
-                    self.record_set_state["embeddings"][target_idx] = (
-                        self.embedding_function(
-                            [normalized_record_set["documents"][idx]]
-                        )[0]
-                    )
+                    self.record_set_state["embeddings"][
+                        target_idx
+                    ] = self.embedding_function(
+                        [normalized_record_set["documents"][idx]]
+                    )[
+                        0
+                    ]
                 if normalized_record_set["metadatas"] is not None:
                     # Sqlite merges the metadata, as opposed to old
                     # implementations which overwrites it
@@ -290,13 +292,13 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
                             # None in the update metadata is a no-op
                             pass
                     else:
-                        self.record_set_state["metadatas"][target_idx] = (
-                            normalized_record_set["metadatas"][idx]
-                        )
+                        self.record_set_state["metadatas"][
+                            target_idx
+                        ] = normalized_record_set["metadatas"][idx]
                 if normalized_record_set["documents"] is not None:
-                    self.record_set_state["documents"][target_idx] = (
-                        normalized_record_set["documents"][idx]
-                    )
+                    self.record_set_state["documents"][
+                        target_idx
+                    ] = normalized_record_set["documents"][idx]
             else:
                 # Add path
                 self.record_set_state["ids"].append(id)
@@ -472,6 +474,8 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
 
 
 def test_embeddings_state(caplog: pytest.LogCaptureFixture, client: ClientAPI) -> None:
+    global traces
+    traces = defaultdict(lambda: 0)
     create_isolated_database(client)
     caplog.set_level(logging.ERROR)
     run_state_machine_as_test(
@@ -490,6 +494,8 @@ def test_embeddings_state_with_search(
     caplog: pytest.LogCaptureFixture, client: ClientAPI
 ) -> None:
     """Test embeddings state machine using search API instead of query."""
+    global traces
+    traces = defaultdict(lambda: 0)
     create_isolated_database(client)
     caplog.set_level(logging.ERROR)
     run_state_machine_as_test(

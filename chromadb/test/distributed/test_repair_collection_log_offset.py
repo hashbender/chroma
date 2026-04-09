@@ -9,7 +9,10 @@ from typing import cast, List, Any, Dict
 import numpy as np
 
 from chromadb.api import ClientAPI
-from chromadb.proto.logservice_pb2 import InspectLogStateRequest, UpdateCollectionLogOffsetRequest
+from chromadb.proto.logservice_pb2 import (
+    InspectLogStateRequest,
+    UpdateCollectionLogOffsetRequest,
+)
 from chromadb.proto.logservice_pb2_grpc import LogServiceStub
 from chromadb.test.conftest import (
     reset,
@@ -20,6 +23,7 @@ from chromadb.test.utils.wait_for_version_increase import wait_for_version_incre
 RECORDS = 1000
 BATCH_SIZE = 100
 
+
 @skip_if_not_cluster()
 def test_repair_collection_log_offset(
     client: ClientAPI,
@@ -29,7 +33,7 @@ def test_repair_collection_log_offset(
     print("Generating data with seed ", seed)
     reset(client)
 
-    channel = grpc.insecure_channel('localhost:50054')
+    channel = grpc.insecure_channel("localhost:50054")
     log_service_stub = LogServiceStub(channel)
 
     collection = client.create_collection(
@@ -53,21 +57,30 @@ def test_repair_collection_log_offset(
     found = False
     now = time.time()
     while time.time() - now < 240:
-        request = InspectLogStateRequest(database_name=str(client.database), collection_id=str(collection.id))
+        request = InspectLogStateRequest(
+            database_name=str(client.database), collection_id=str(collection.id)
+        )
         response = log_service_stub.InspectLogState(request, timeout=60)
-        if '''LogPosition { offset: 1001 }''' in response.debug:
+        if """LogPosition { offset: 1001 }""" in response.debug:
             found = True
             break
+        time.sleep(1)
     assert found
 
-    request = UpdateCollectionLogOffsetRequest(database_name=str(client.database), collection_id=str(collection.id), log_offset=1)
+    request = UpdateCollectionLogOffsetRequest(
+        database_name=str(client.database),
+        collection_id=str(collection.id),
+        log_offset=1,
+    )
     response = log_service_stub.RollbackCollectionLogOffset(request, timeout=60)
 
     now = time.time()
     while time.time() - now < 240:
-        request = InspectLogStateRequest(database_name=str(client.database), collection_id=str(collection.id))
+        request = InspectLogStateRequest(
+            database_name=str(client.database), collection_id=str(collection.id)
+        )
         response = log_service_stub.InspectLogState(request, timeout=60)
-        if '''LogPosition { offset: 1001 }''' in response.debug:
+        if """LogPosition { offset: 1001 }""" in response.debug:
             return
         time.sleep(1)
     raise RuntimeError("Test timed out without repair")
