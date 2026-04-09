@@ -164,6 +164,8 @@ class Settings(BaseSettings):  # type: ignore
 
     allow_reset: bool = False
 
+    chroma_server_debug: bool = False
+
     # ===========================
     # {Client, Server} auth{n, z}
     # ===========================
