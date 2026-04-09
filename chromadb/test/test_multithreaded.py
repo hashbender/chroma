@@ -2,6 +2,7 @@ import multiprocessing
 from concurrent.futures import Future, ThreadPoolExecutor, wait
 import random
 import threading
+import time
 from typing import Any, Dict, List, Optional, Set, Tuple, cast
 import numpy as np
 
@@ -11,6 +12,14 @@ from chromadb.api.segment import SegmentAPI
 from chromadb.test.property.strategies import RecordSet
 from chromadb.test.property.strategies import test_hnsw_config
 from chromadb.types import Metadata
+
+
+def _seed_random() -> int:
+    """Seed both random and numpy with a time-based seed and return it for reproducibility."""
+    seed = int(time.time() * 1000) & 0xFFFFFFFF
+    random.seed(seed)
+    np.random.seed(seed)
+    return seed
 
 
 def generate_data_shape() -> Tuple[int, int]:
@@ -216,6 +225,8 @@ def _test_interleaved_add_query(
 
 
 def test_multithreaded_add(client: ClientAPI) -> None:
+    seed = _seed_random()
+    print(f"test_multithreaded_add seed: {seed}")
     for i in range(3):
         num_workers = random.randint(2, multiprocessing.cpu_count() * 2)
         N, D = generate_data_shape()
@@ -223,6 +234,8 @@ def test_multithreaded_add(client: ClientAPI) -> None:
 
 
 def test_interleaved_add_query(client: ClientAPI) -> None:
+    seed = _seed_random()
+    print(f"test_interleaved_add_query seed: {seed}")
     for i in range(3):
         num_workers = random.randint(2, multiprocessing.cpu_count() * 2)
         N, D = generate_data_shape()

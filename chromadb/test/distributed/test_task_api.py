@@ -17,9 +17,9 @@ from chromadb.errors import ChromaError, NotFoundError
 from chromadb.test.conftest import skip_if_not_cluster
 from chromadb.test.utils.wait_for_version_increase import (
     get_collection_version,
+    poll_for_condition,
     wait_for_version_increase,
 )
-from time import sleep
 
 pytestmark = [skip_if_not_cluster()]
 
@@ -58,8 +58,29 @@ def test_count_function_attach_and_detach(basic_http_client: System) -> None:
     assert collection.count() == 300
 
     wait_for_version_increase(client, collection.name, initial_version)
-    # Give some time to invalidate the frontend query cache
-    sleep(60)
+
+    # Poll until function output is available (replaces fixed sleep for cache invalidation)
+    poll_for_condition(
+        lambda: (
+            client.get_collection("my_documents_counts").get("function_output")[
+                "metadatas"
+            ]
+            is not None
+            and len(
+                client.get_collection("my_documents_counts").get("function_output")[
+                    "metadatas"
+                ]
+            )
+            > 0
+            and client.get_collection("my_documents_counts")
+            .get("function_output")["metadatas"][0]
+            .get("total_count")
+            == 300
+        ),
+        timeout=120,
+        interval=5,
+        description="function output for my_documents_counts",
+    )
 
     result = client.get_collection("my_documents_counts").get("function_output")
     assert result["metadatas"] is not None
@@ -521,8 +542,29 @@ def test_count_function_attach_and_detach_attach_attach(
     assert collection.count() == 300
 
     wait_for_version_increase(client, collection.name, initial_version)
-    # Give some time to invalidate the frontend query cache
-    sleep(60)
+
+    # Poll until function output is available (replaces fixed sleep for cache invalidation)
+    poll_for_condition(
+        lambda: (
+            client.get_collection("my_documents_counts").get("function_output")[
+                "metadatas"
+            ]
+            is not None
+            and len(
+                client.get_collection("my_documents_counts").get("function_output")[
+                    "metadatas"
+                ]
+            )
+            > 0
+            and client.get_collection("my_documents_counts")
+            .get("function_output")["metadatas"][0]
+            .get("total_count")
+            == 300
+        ),
+        timeout=120,
+        interval=5,
+        description="function output for my_documents_counts (attach-detach-attach)",
+    )
 
     result = client.get_collection("my_documents_counts").get("function_output")
     assert result["metadatas"] is not None

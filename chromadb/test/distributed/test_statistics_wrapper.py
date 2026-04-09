@@ -3,7 +3,6 @@ Integration test for the Collection statistics wrapper methods
 """
 
 import json
-import time
 from typing import Any
 
 import pytest
@@ -14,6 +13,7 @@ from chromadb.config import System
 from chromadb.test.conftest import skip_if_not_cluster
 from chromadb.test.utils.wait_for_version_increase import (
     get_collection_version,
+    poll_for_condition,
     wait_for_version_increase,
 )
 from chromadb.utils.statistics import (
@@ -61,7 +61,22 @@ def test_statistics_wrapper(basic_http_client: System) -> None:
 
     # Wait for statistics to be computed
     wait_for_version_increase(client, collection.name, initial_version)
-    time.sleep(60)
+
+    # Poll until statistics are available (replaces fixed sleep for cache invalidation)
+    def _check_statistics_ready() -> bool:
+        s = get_statistics(collection, "test_collection_statistics")
+        return (
+            "statistics" in s
+            and "summary" in s
+            and s["summary"].get("total_count") == 3
+        )
+
+    poll_for_condition(
+        _check_statistics_ready,
+        timeout=120,
+        interval=5,
+        description="statistics to be computed for test_collection_statistics",
+    )
 
     # Get statistics
     stats = get_statistics(collection, "test_collection_statistics")
@@ -237,7 +252,18 @@ def test_statistics_wrapper_key_filter(basic_http_client: System) -> None:
     )
 
     wait_for_version_increase(client, collection.name, initial_version)
-    time.sleep(60)
+
+    # Poll until statistics are available (replaces fixed sleep for cache invalidation)
+    poll_for_condition(
+        lambda: (
+            "statistics" in get_statistics(collection, "key_filter_test_statistics")
+            and "category"
+            in get_statistics(collection, "key_filter_test_statistics")["statistics"]
+        ),
+        timeout=120,
+        interval=5,
+        description="statistics to be computed for key_filter_test_statistics",
+    )
 
     # Get all statistics (no key filter)
     all_stats = get_statistics(collection, "key_filter_test_statistics")
@@ -334,9 +360,21 @@ def test_statistics_wrapper_incremental_updates(basic_http_client: System) -> No
     )
 
     wait_for_version_increase(client, collection.name, next_version)
-    # TODO(tanujnay112): Remove this sleep once query cache invalidation is solidified
-    # or figure out a different testing harness where we don't have to wait for query cache invalidation
-    time.sleep(70)
+
+    # Poll until updated statistics are available (replaces fixed sleep for cache invalidation)
+    poll_for_condition(
+        lambda: (
+            get_statistics(collection, "incremental_test_statistics")
+            .get("statistics", {})
+            .get("category", {})
+            .get("A", {})
+            .get("count")
+            == 3
+        ),
+        timeout=120,
+        interval=5,
+        description="incremental statistics update",
+    )
 
     # Check updated statistics
     stats = get_statistics(collection, "incremental_test_statistics")

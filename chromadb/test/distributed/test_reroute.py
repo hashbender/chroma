@@ -43,7 +43,7 @@ def test_reroute(
         v1.delete_namespaced_pod(name, namespace)
 
     # Wait until we have len(seen_ids) pods running with new UIDs
-    timeout_secs = 10
+    timeout_secs = 60
     start_time = time.time()
     while True:
         res = v1.list_namespaced_pod("chroma", label_selector="app=query-service")
@@ -56,6 +56,7 @@ def test_reroute(
         time.sleep(1)
 
     # Wait for the query service to be ready, or timeout
+    ready_start_time = time.time()
     while True:
         res = v1.list_namespaced_pod("chroma", label_selector="app=query-service")
         items = res.items
@@ -66,7 +67,7 @@ def test_reroute(
                 break
         if ready:
             break
-        if time.time() - start_time > timeout_secs:
+        if time.time() - ready_start_time > timeout_secs:
             assert False, "Timed out waiting for new pods to be ready"
         time.sleep(1)
 
