@@ -1,0 +1,58 @@
+# .github/workflows/mirror-prs.yml
+name: Mirror PRs
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+jobs:
+  mirror:
+    runs-on: tenki-standard-autoscale
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Mirror upstream PRs
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          UPSTREAM: chroma-core/chroma
+          FORK: tenki-cloud/chroma          # your fork org/repo
+          REVIEWER: tenki-reviewer           # your code review bot username
+        run: |
+          git remote add upstream https://github.com/$UPSTREAM.git || true
+          git fetch upstream '+refs/pull/*/head:refs/remotes/upstream-pr/*'
+
+          # Get open PRs from upstream (last 20)
+          gh pr list --repo $UPSTREAM --state open --limit 20 --json number,title,headRefName,body > /tmp/upstream_prs.json
+
+          # For each upstream PR, mirror it
+          jq -c '.[]' /tmp/upstream_prs.json | while read pr; do
+            NUMBER=$(echo $pr | jq -r '.number')
+            TITLE=$(echo $pr | jq -r '.title')
+            MIRROR_BRANCH="mirror/upstream-pr-${NUMBER}"
+
+            # Check if we already have this PR mirrored
+            EXISTING=$(gh pr list --repo $FORK --head $MIRROR_BRANCH --json number --jq 'length')
+            if [ "$EXISTING" -gt 0 ]; then
+              echo "PR #$NUMBER already mirrored, updating branch..."
+              git checkout -B $MIRROR_BRANCH upstream-pr/$NUMBER
+              git push origin $MIRROR_BRANCH --force
+              continue
+            fi
+
+            # Create the mirror branch and PR
+            echo "Mirroring PR #$NUMBER: $TITLE"
+            git checkout -B $MIRROR_BRANCH upstream-pr/$NUMBER
+            git push origin $MIRROR_BRANCH --force
+
+            # Create PR on fork
+            gh pr create \
+              --repo $FORK \
+              --base main \
+              --head $MIRROR_BRANCH \
+              --title "[Mirror] $TITLE (upstream #$NUMBER)" \
+              --body "Mirrored from ${UPSTREAM}#${NUMBER}" \
+              --reviewer $REVIEWER || true
+          done

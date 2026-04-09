@@ -1,0 +1,33 @@
+# .github/workflows/cleanup-mirrors.yml
+name: Cleanup Closed Mirrors
+on:
+  schedule:
+    - cron: '0 */6 * * *'  # every 6 hours
+  workflow_dispatch:
+
+jobs:
+  cleanup:
+    runs-on: tenki-standard-autoscale
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Close mirrored PRs for closed upstream PRs
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          UPSTREAM: chroma-core/chroma
+          FORK: tenki-cloud/chroma
+        run: |
+          gh pr list --repo $FORK --state open --limit 100 --json number,headRefName | \
+          jq -c '.[] | select(.headRefName | startswith("mirror/upstream-pr-"))' | while read pr; do
+            HEAD=$(echo $pr | jq -r '.headRefName')
+            OUR_NUM=$(echo $pr | jq -r '.number')
+            UPSTREAM_NUM=$(echo $HEAD | sed 's/mirror\/upstream-pr-//')
+
+            STATE=$(gh pr view $UPSTREAM_NUM --repo $UPSTREAM --json state --jq '.state' 2>/dev/null || echo "CLOSED")
+            if [ "$STATE" != "OPEN" ]; then
+              echo "Closing mirrored PR #$OUR_NUM (upstream #$UPSTREAM_NUM is $STATE)"
+              gh pr close $OUR_NUM --repo $FORK --comment "Upstream PR was ${STATE}" || true
+            fi
+          done
