@@ -31,7 +31,7 @@ jobs:
           - "chromadb/test/property/test_cross_version_persist.py"
         include:
           - test-glob: "chromadb/test/property --ignore-glob chromadb/test/property/test_cross_version_persist.py"
-            parallelized: false  # Disabled to fix INTERNALERROR crashes in CI
+            parallelized: false # Disabled to fix INTERNALERROR crashes in CI
 
     runs-on: ${{ inputs.runner }}
     steps:
@@ -154,7 +154,7 @@ jobs:
           - test-glob: "chromadb/test/api"
           - test-glob: "chromadb/test/property/test_collections_with_database_tenant.py"
           - test-glob: "chromadb/test/property/test_collections_with_database_tenant_overwrite.py"
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: tenki-standard-autoscale
     # OIDC token auth for AWS
     permissions:
       contents: read
@@ -194,7 +194,7 @@ jobs:
 
   merge-cluster-logs:
     if: ${{ contains(inputs.runner, 'ubuntu') }}
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: tenki-standard-autoscale
     needs: test-cluster-rust-frontend
     steps:
       - name: Merge
@@ -273,7 +273,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{ fromJson(inputs.python_versions) }}
-    runs-on: 8core-32gb-windows-latest
+    runs-on: tenki-standard-autoscale
     steps:
       - name: Checkout
         uses: actions/checkout@v4
