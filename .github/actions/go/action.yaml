@@ -18,11 +18,6 @@ runs:
         sudo rm protoc-28.2-linux-x86_64.zip
       shell: bash
 
-    - name: Add Go bin to PATH
-      run: |
-        export PATH="$PATH:$(go env GOPATH)/bin"
-      shell: bash
-
     - name: Install protoc-gen-go
       run: |
         go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.34.2

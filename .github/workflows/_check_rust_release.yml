@@ -4,9 +4,6 @@ on:
   workflow_call:
 jobs:
   test:
-    strategy:
-      matrix:
-        platform: [blacksmith-8vcpu-ubuntu-2404]
     runs-on: tenki-standard-autoscale
     env:
       CARGO_TERM_COLOR: always
@@ -20,7 +17,7 @@ jobs:
         with:
           github-token: ${{ github.token }}
       - name: Install cargo hack
-        run: cargo install cargo-hack
+        uses: taiki-e/install-action@cargo-hack
       - name: Check chroma-error
         run: cargo hack clippy -p chroma-error --all-targets --feature-powerset -- -D clippy::all
       - name: Check chroma-api-types

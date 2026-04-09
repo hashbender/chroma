@@ -245,19 +245,7 @@ jobs:
           github-token: ${{ github.token }}
       - name: Run pre-commit
         shell: bash
-        run: |
-          pre-commit run --all-files trailing-whitespace
-          pre-commit run --all-files mixed-line-ending
-          pre-commit run --all-files end-of-file-fixer
-          pre-commit run --all-files requirements-txt-fixer
-          pre-commit run --all-files check-xml
-          pre-commit run --all-files check-merge-conflict
-          pre-commit run --all-files check-case-conflict
-          pre-commit run --all-files check-docstring-first
-          pre-commit run --all-files black
-          pre-commit run --all-files flake8
-          pre-commit run --all-files prettier
-          pre-commit run --all-files check-yaml
+        run: pre-commit run --all-files
         continue-on-error: true
       - name: Cargo fmt check
         shell: bash

@@ -130,8 +130,6 @@ jobs:
         python: ${{ fromJson(inputs.python_versions) }}
         test-glob:
           - "chromadb/test/api"
-          - "chromadb/test/api/test_collection.py"
-          - "chromadb/test/api/test_limit_offset.py"
           - "chromadb/test/property/test_collections.py"
           - "chromadb/test/property/test_add.py"
           - "chromadb/test/property/test_filtering.py"
@@ -144,7 +142,6 @@ jobs:
           - "chromadb/test/distributed/test_repair_collection_log_offset.py"
           - "chromadb/test/distributed/test_task_api.py"
           - "chromadb/test/distributed/test_statistics_wrapper.py"
-          - "chromadb/test/api/test_indexing_status.py"
         include:
           - test-glob: "chromadb/test/property/test_add.py"
             parallelized: false
