@@ -14,7 +14,7 @@ jobs:
   # This job detects what changed and determines which tests to run
   change-detection:
     name: Detect changes and determine tests
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: tenki-standard-autoscale
     outputs:
       helm-changes: ${{ steps.filter.outputs.helm-changes }}
       # Test flags as a JSON array
@@ -117,7 +117,7 @@ jobs:
     name: Warn if Helm chart was updated without version bump
     needs: change-detection
     if: needs.change-detection.outputs.helm-changes == 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: tenki-standard-autoscale
     permissions:
       pull-requests: write
     steps:
@@ -142,7 +142,7 @@ jobs:
     name: Delete Helm chart comment if not changed
     needs: change-detection
     if: needs.change-detection.outputs.helm-changes == 'false'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: tenki-standard-autoscale
     permissions:
       pull-requests: write
     steps:
@@ -163,7 +163,7 @@ jobs:
     if: |
       contains(fromJson(needs.change-detection.outputs.tests-to-run), 'rust') ||
       contains(fromJson(needs.change-detection.outputs.tests-to-run), 'python')
-    runs-on: blacksmith-16vcpu-ubuntu-2404
+    runs-on: tenki-standard-autoscale
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -232,7 +232,7 @@ jobs:
 
   lint:
     name: Lint
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: tenki-standard-autoscale
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -285,7 +285,7 @@ jobs:
       - lint
       - check-helm-version-bump
       - delete-helm-comment
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: tenki-standard-autoscale
     steps:
       - name: Decide whether the needed jobs succeeded or failed
         uses: re-actors/alls-green@release/v1
@@ -308,7 +308,7 @@ jobs:
       - lint
       - check-helm-version-bump
       - delete-helm-comment
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: tenki-standard-autoscale
     steps:
       - name: Notify Slack
         uses: slackapi/slack-github-action@v2.0.0
