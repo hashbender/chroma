@@ -15,6 +15,11 @@ jobs:
       - uses: pnpm/action-setup@v3
         with:
           version: "9"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+          cache-dependency-path: clients/new-js/pnpm-lock.yaml
       - name: Install dependencies
         run: cd clients/new-js && pnpm install --no-frozen-lockfile
       - name: Test
