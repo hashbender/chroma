@@ -41,7 +41,7 @@ permissions:
 jobs:
   version:
     name: Resolve version
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: tenki-standard-autoscale
     outputs:
       version: ${{ steps.resolve_version.outputs.version }}
     steps:
@@ -59,17 +59,17 @@ jobs:
           fi
   build:
     name: build-${{ matrix.platform.os }}-${{ matrix.platform.target }}
-    runs-on: ${{ matrix.platform.runner }}
+    runs-on: tenki-standard-autoscale
     needs: version
     strategy:
       fail-fast: false
       matrix:
         platform:
-          - { os: linux, runner: blacksmith-4vcpu-ubuntu-2404, target: x86_64 }
-          - { os: linux, runner: blacksmith-4vcpu-ubuntu-2404-arm, target: aarch64 }
-          - { os: windows, runner: 8core-32gb-windows-latest, target: x64 }
-          - { os: macos, runner: macos-14, target: x86_64 }
-          - { os: macos, runner: macos-14, target: aarch64 }
+          - {os: linux, runner: blacksmith-4vcpu-ubuntu-2404, target: x86_64}
+          - {os: linux, runner: blacksmith-4vcpu-ubuntu-2404-arm, target: aarch64}
+          - {os: windows, runner: 8core-32gb-windows-latest, target: x64}
+          - {os: macos, runner: macos-14, target: x86_64}
+          - {os: macos, runner: macos-14, target: aarch64}
 
     steps:
       - uses: actions/checkout@v4
@@ -117,7 +117,7 @@ jobs:
 
   sdist:
     name: build-sdist
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: tenki-standard-autoscale
     needs: version
     steps:
       - uses: actions/checkout@v4
@@ -160,7 +160,7 @@ jobs:
 
   release:
     name: Release
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: tenki-standard-autoscale
     if: ${{ inputs.publish_to_pypi || inputs.publish_to_test_pypi }}
     needs: [build, sdist]
     permissions:

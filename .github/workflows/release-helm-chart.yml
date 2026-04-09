@@ -7,11 +7,10 @@ on:
     branches:
       - main
   workflow_dispatch:
-
 jobs:
   detect-version-change:
     name: Detect if version in Chart.yaml was changed
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: tenki-standard-autoscale
     outputs:
       version_changed: ${{ steps.detect-version-change.outputs.version_changed }}
       version: ${{ steps.detect-version-change.outputs.version }}
@@ -41,7 +40,7 @@ jobs:
   publish-helm:
     name: Publish Helm chart
     needs: detect-version-change
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: tenki-standard-autoscale
     permissions:
       id-token: write
       contents: read
@@ -74,7 +73,7 @@ jobs:
     name: Notify Slack on Helm Chart Release Failure
     if: failure()
     needs: [publish-helm]
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: tenki-standard-autoscale
     steps:
       - name: Notify Slack
         uses: slackapi/slack-github-action@v2.0.0

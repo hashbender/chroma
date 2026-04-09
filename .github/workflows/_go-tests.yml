@@ -2,10 +2,9 @@ name: Go tests
 
 on:
   workflow_call:
-
 jobs:
   cluster-test:
-    runs-on: "blacksmith-16vcpu-ubuntu-2404"
+    runs-on: tenki-standard-autoscale
     # OIDC token auth for AWS
     permissions:
       contents: read

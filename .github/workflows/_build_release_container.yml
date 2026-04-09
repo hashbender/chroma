@@ -47,7 +47,7 @@ env:
 jobs:
   build:
     name: Build image for ${{ matrix.platform }}
-    runs-on: ${{ matrix.runner }}
+    runs-on: tenki-standard-autoscale
     strategy:
       fail-fast: false
       matrix:
@@ -110,14 +110,14 @@ jobs:
             RELEASE_MODE=1
           tags: ${{ steps.tags.outputs.tags }}
     outputs:
-      ghcr_tag_amd64:      ${{ steps.tags.outputs.ghcr_tag_amd64 }}
-      ghcr_tag_arm64:      ${{ steps.tags.outputs.ghcr_tag_arm64 }}
+      ghcr_tag_amd64: ${{ steps.tags.outputs.ghcr_tag_amd64 }}
+      ghcr_tag_arm64: ${{ steps.tags.outputs.ghcr_tag_arm64 }}
       dockerhub_tag_amd64: ${{ steps.tags.outputs.dockerhub_tag_amd64 }}
       dockerhub_tag_arm64: ${{ steps.tags.outputs.dockerhub_tag_arm64 }}
 
   merge:
     name: Merge platform manifests
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: tenki-standard-autoscale
     if: ${{ inputs.push == true }}
     needs:
       - build
