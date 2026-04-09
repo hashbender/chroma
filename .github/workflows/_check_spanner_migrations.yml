@@ -2,10 +2,9 @@ name: Check Spanner migrations
 
 on:
   workflow_call:
-
 jobs:
   check-migrations:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: tenki-standard-autoscale
     env:
       CARGO_TERM_COLOR: always
     steps:
